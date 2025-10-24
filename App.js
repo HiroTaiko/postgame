@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
 
-const MAX_HP = 1000;
+const MAX_HP = 100;
 const SECONDARY_STAT_MAX = 10;
 const METERS_PER_DEG_LAT = 111320;
 const HEALING_ZONE_REGEN_PER_SECOND = 3;
@@ -74,16 +74,6 @@ const evaluateZoneDamage = (distanceMeters, zone) => {
   const effectiveDenominator = denominator > 0 ? denominator : 0.1;
   const uncappedDamage = baseDamage + scale / effectiveDenominator;
   return zone.maxDamage == null ? uncappedDamage : Math.min(zone.maxDamage, uncappedDamage);
-};
-
-const formatDistance = (distanceMeters) => {
-  if (!Number.isFinite(distanceMeters)) {
-    return '---';
-  }
-  if (distanceMeters >= 1000) {
-    return `${(distanceMeters / 1000).toFixed(2)} km`;
-  }
-  return `${distanceMeters.toFixed(1)} m`;
 };
 
 const getHapticsConfig = (damage) => {
@@ -237,7 +227,7 @@ const HEALING_ZONE = {
 };
 
 const INITIAL_STATS = {
-  hp: 1000,
+  hp: 100,
   guard: 5,
   resonance: 5
 };
@@ -564,16 +554,7 @@ export default function App() {
       return <Text style={styles.infoText}>現在地を取得しています...</Text>;
     }
 
-    const { latitude, longitude, altitude, accuracy } = location.coords;
-    const nearestZone = zoneSummaries.reduce((closest, zone) => {
-      if (!Number.isFinite(zone.distance)) {
-        return closest;
-      }
-      if (!closest || zone.distance < closest.distance) {
-        return zone;
-      }
-      return closest;
-    }, null);
+    const { latitude, longitude, altitude } = location.coords;
 
     return (
       <View style={styles.locationContainer}>
@@ -582,15 +563,7 @@ export default function App() {
         {typeof altitude === 'number' && (
           <Text style={styles.coordinate}>高度: {altitude.toFixed(1)} m</Text>
         )}
-        {typeof accuracy === 'number' && (
-          <Text style={styles.meta}>精度: ±{accuracy.toFixed(1)} m</Text>
-        )}
         <Text style={styles.meta}>更新: {new Date(location.timestamp).toLocaleString()}</Text>
-        {nearestZone && (
-          <Text style={styles.meta}>
-            最寄り危険源: {nearestZone.name}（{formatDistance(nearestZone.distance)}）
-          </Text>
-        )}
         {Platform.OS === 'android' && (
           <Text style={styles.meta}>Androidで精度が低い場合は位置設定を高精度にしてください。</Text>
         )}
@@ -598,9 +571,9 @@ export default function App() {
     );
   };
 
-  const activeHazardCount = zoneSummaries.filter((zone) => zone.mitigatedDamage > 0).length;
-  const totalHazardCount = zoneSummaries.length;
   const lastDamageDisplay = lastDamage > 0 ? lastDamage.toFixed(1) : '0';
+  const currentDamagePerSecond = Math.max(0, Math.round(lastDamage));
+  const displayedHp = Math.round(stats.hp);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -612,7 +585,7 @@ export default function App() {
         <View style={styles.statCard}>
           <View style={styles.statHeader}>
             <Text style={styles.statName}>HP</Text>
-            <Text style={styles.statValue}>{stats.hp}/{MAX_HP}</Text>
+            <Text style={styles.statValue}>{displayedHp}/{MAX_HP}</Text>
           </View>
           <View style={styles.progressTrack}>
             <View
@@ -628,63 +601,19 @@ export default function App() {
           <View style={styles.statCardHalf}>
             <Text style={styles.statName}>護力</Text>
             <Text style={styles.statValue}>{stats.guard}</Text>
-            <View style={styles.progressTrackSmall}>
-              <View
-                style={[
-                  styles.progressFill,
-                  styles.guardFill,
-                  { width: `${Math.min(stats.guard, SECONDARY_STAT_MAX) / SECONDARY_STAT_MAX * 100}%` }
-                ]}
-              />
-            </View>
           </View>
           <View style={styles.statCardHalf}>
             <Text style={styles.statName}>響力</Text>
             <Text style={styles.statValue}>{stats.resonance}</Text>
-            <View style={styles.progressTrackSmall}>
-              <View
-                style={[
-                  styles.progressFill,
-                  styles.resonanceFill,
-                  { width: `${Math.min(stats.resonance, SECONDARY_STAT_MAX) / SECONDARY_STAT_MAX * 100}%` }
-                ]}
-              />
-            </View>
           </View>
         </View>
         <View style={styles.statusMetaBlock}>
           <Text style={styles.statusMeta}>直近ダメージ合計: -{lastDamageDisplay} HP</Text>
           <Text style={styles.statusMeta}>
-            影響中の危険源: {activeHazardCount}/{totalHazardCount}
-          </Text>
-          <Text style={styles.statusMeta}>
-            ヒーリングゾーン: {isInHealingZone ? '内' : '外'}
+            現在の毎秒ダメージ: -{currentDamagePerSecond} HP/s
           </Text>
         </View>
       </View>
-      {zoneSummaries.length > 0 && (
-        <View style={styles.dangerSection}>
-          <Text style={styles.sectionTitle}>ダメージ源</Text>
-          {zoneSummaries.map((zone) => (
-            <View key={zone.id} style={styles.dangerCard}>
-              <Text style={styles.dangerName}>
-                {zone.name}
-                {zone.isDynamic ? '（移動中）' : ''}
-              </Text>
-              <Text style={styles.dangerMeta}>距離: {formatDistance(zone.distance)}</Text>
-              <Text style={styles.dangerMeta}>
-                想定ダメージ: -{zone.rawDamage.toFixed(1)} HP
-              </Text>
-              <Text style={styles.dangerMeta}>
-                ガード後: -{zone.mitigatedDamage.toFixed(1)} HP
-              </Text>
-              <Text style={styles.dangerMeta}>
-                上限: {zone.maxDamage != null ? `-${zone.maxDamage.toFixed(1)} HP` : 'なし'}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
     </SafeAreaView>
   );
 }
@@ -780,23 +709,11 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     overflow: 'hidden'
   },
-  progressTrackSmall: {
-    height: 6,
-    backgroundColor: '#312e81',
-    borderRadius: 999,
-    overflow: 'hidden'
-  },
   progressFill: {
     height: '100%'
   },
   hpFill: {
     backgroundColor: '#f87171'
-  },
-  guardFill: {
-    backgroundColor: '#38bdf8'
-  },
-  resonanceFill: {
-    backgroundColor: '#a855f7'
   },
   statusMetaBlock: {
     marginTop: 12,
@@ -806,24 +723,4 @@ const styles = StyleSheet.create({
     color: '#cbd5f5',
     fontSize: 14
   },
-  dangerSection: {
-    width: '100%',
-    marginTop: 24,
-    gap: 12
-  },
-  dangerCard: {
-    backgroundColor: '#111827',
-    padding: 16,
-    borderRadius: 16,
-    gap: 4
-  },
-  dangerName: {
-    color: '#f8fafc',
-    fontSize: 16,
-    fontWeight: '600'
-  },
-  dangerMeta: {
-    color: '#cbd5f5',
-    fontSize: 14
-  }
 });
