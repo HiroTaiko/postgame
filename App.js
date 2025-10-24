@@ -62,10 +62,12 @@ const evaluateZoneDamage = (distanceMeters, zone) => {
     return 0;
   }
 
-  const proximity = zone.safeRadius - distanceMeters;
-  const quadratic = zone.coefficient * proximity * proximity;
-  const base = zone.minDamage ?? 0;
-  const uncappedDamage = base + quadratic;
+  const baseDamage = zone.baseDamage ?? 0;
+  const scale = zone.scale ?? 0;
+  const offset = zone.offset ?? 0;
+  const denominator = distanceMeters + offset;
+  const effectiveDenominator = denominator > 0 ? denominator : 0.1;
+  const uncappedDamage = baseDamage + scale / effectiveDenominator;
   return zone.maxDamage == null ? uncappedDamage : Math.min(zone.maxDamage, uncappedDamage);
 };
 
@@ -159,28 +161,31 @@ const DANGER_ZONES = [
     id: 'scramble-beacon',
     name: '羽根木',
     coords: { latitude: 35.657736, longitude: 139.654440 },
-    safeRadius: 25,
-    coefficient: 0.02,
-    maxDamage: 18,
-    minDamage: 6
+    safeRadius: 60,
+    baseDamage: 6,
+    scale: 30,
+    offset: 0.1,
+    maxDamage: 18
   },
   {
     id: 'station-rift',
     name: '代田八幡',
     coords: { latitude: 35.657420, longitude: 139.659367 },
-    safeRadius: 25,
-    coefficient: 0.02,
-    maxDamage: 18,
-    minDamage: 6
+    safeRadius: 60,
+    baseDamage: 6,
+    scale: 30,
+    offset: 0.1,
+    maxDamage: 18
   },
   {
     id: 'park-resonator',
     name: 'トトロ',
     coords: { latitude: 35.658889877286676, longitude: 139.66268309340128 },
-    safeRadius: 25,
-    coefficient: 0.02,
-    maxDamage: 18,
-    minDamage: 6
+    safeRadius: 60,
+    baseDamage: 6,
+    scale: 30,
+    offset: 0.1,
+    maxDamage: 18
   }
 ];
 
@@ -189,9 +194,10 @@ const MOVING_HAZARD = {
   name: '下北駅',
   center: { latitude: 35.661383, longitude: 139.667557 },
   radiusMeters: 30,
-  safeRadius: 30,
-  coefficient: 0.05,
-  minDamage: 6,
+  safeRadius: 60,
+  baseDamage: 6,
+  scale: 135,
+  offset: 3,
   speedMetersPerSecond: 3,
   initialHeadingDegrees: 45,
   initialOffsetMeters: { x: 120, y: -60 }
@@ -292,8 +298,9 @@ export default function App() {
           name: MOVING_HAZARD.name,
           coords: dynamicState.coords,
           safeRadius: MOVING_HAZARD.safeRadius,
-          coefficient: MOVING_HAZARD.coefficient,
-          minDamage: MOVING_HAZARD.minDamage,
+          baseDamage: MOVING_HAZARD.baseDamage,
+          scale: MOVING_HAZARD.scale,
+          offset: MOVING_HAZARD.offset,
           maxDamage: MOVING_HAZARD.maxDamage ?? null
         };
 
