@@ -571,8 +571,7 @@ export default function App() {
     );
   };
 
-  const lastDamageDisplay = lastDamage > 0 ? lastDamage.toFixed(1) : '0';
-  const currentDamagePerSecond = Math.max(0, Math.round(lastDamage));
+  const currentDamagePerSecond = lastDamage > 0 ? lastDamage.toFixed(1) : '0.0';
   const displayedHp = Math.round(stats.hp);
 
   return (
@@ -608,7 +607,6 @@ export default function App() {
           </View>
         </View>
         <View style={styles.statusMetaBlock}>
-          <Text style={styles.statusMeta}>直近ダメージ合計: -{lastDamageDisplay} HP</Text>
           <Text style={styles.statusMeta}>
             現在の毎秒ダメージ: -{currentDamagePerSecond} HP/s
           </Text>
