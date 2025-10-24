@@ -6,8 +6,9 @@ import * as Haptics from 'expo-haptics';
 
 const MAX_HP = 1000;
 const SECONDARY_STAT_MAX = 10;
-const HP_REGEN_PER_SECOND = 1;
 const METERS_PER_DEG_LAT = 111320;
+const HEALING_ZONE_REGEN_PER_SECOND = 3;
+const HEALING_ZONE_ZERO_HP_DELAY_SECONDS = 60;
 
 const toRadians = (degrees) => (degrees * Math.PI) / 180;
 
@@ -203,6 +204,13 @@ const MOVING_HAZARD = {
   initialOffsetMeters: { x: 120, y: -60 }
 };
 
+const HEALING_ZONE = {
+  id: 'sanctuary-courtyard',
+  name: '森の泉',
+  center: { latitude: 35.65995, longitude: 139.6648 },
+  radiusMeters: 20
+};
+
 const INITIAL_STATS = {
   hp: 1000,
   guard: 5,
@@ -216,6 +224,7 @@ export default function App() {
   const [stats, setStats] = useState(INITIAL_STATS);
   const [lastDamage, setLastDamage] = useState(0);
   const [zoneSummaries, setZoneSummaries] = useState([]);
+  const [isInHealingZone, setIsInHealingZone] = useState(false);
   const [movingHazardState, setMovingHazardState] = useState(() =>
     createInitialMovingHazardState(MOVING_HAZARD)
   );
@@ -229,6 +238,9 @@ export default function App() {
   );
   const movementTimestampRef = useRef(Date.now());
   const locationRef = useRef(null);
+  const hpRef = useRef(INITIAL_STATS.hp);
+  const isInHealingZoneRef = useRef(false);
+  const healingZoneTimerRef = useRef(0);
   const hapticStageRef = useRef(0);
   const hapticIntervalRef = useRef(0);
   const hapticStyleRef = useRef(Haptics.ImpactFeedbackStyle.Light);
@@ -245,6 +257,10 @@ export default function App() {
   useEffect(() => {
     movingHazardRef.current = movingHazardState;
   }, [movingHazardState]);
+
+  useEffect(() => {
+    hpRef.current = stats.hp;
+  }, [stats.hp]);
 
   const updateDamageHaptics = useCallback((damage) => {
     const { stage, intervalMs, style } = getHapticsConfig(damage);
@@ -270,14 +286,25 @@ export default function App() {
       if (!coords) {
         setZoneSummaries([]);
         setLastDamage(0);
+        setIsInHealingZone(false);
+        isInHealingZoneRef.current = false;
+        healingZoneTimerRef.current = 0;
         return;
       }
 
       const guardValue = stats.guard;
+      const insideHealingZone =
+        calculateDistanceMeters(coords, HEALING_ZONE.center) <= HEALING_ZONE.radiusMeters;
+
+      setIsInHealingZone(insideHealingZone);
+      isInHealingZoneRef.current = insideHealingZone;
+      if (!insideHealingZone) {
+        healingZoneTimerRef.current = 0;
+      }
 
       const summaries = DANGER_ZONES.map((zone) => {
         const distance = calculateDistanceMeters(coords, zone.coords);
-        const rawDamage = evaluateZoneDamage(distance, zone);
+        const rawDamage = insideHealingZone ? 0 : evaluateZoneDamage(distance, zone);
         const mitigatedDamage = Math.max(rawDamage - guardValue, 0);
 
         return {
@@ -305,7 +332,7 @@ export default function App() {
         };
 
         const distance = calculateDistanceMeters(coords, dynamicZone.coords);
-        const rawDamage = evaluateZoneDamage(distance, dynamicZone);
+        const rawDamage = insideHealingZone ? 0 : evaluateZoneDamage(distance, dynamicZone);
         const mitigatedDamage = Math.max(rawDamage - guardValue, 0);
 
         summaries.push({
@@ -332,6 +359,7 @@ export default function App() {
           if (nextHp === prev.hp) {
             return prev;
           }
+          hpRef.current = nextHp;
           return { ...prev, hp: nextHp };
         });
       }
@@ -411,18 +439,45 @@ export default function App() {
         return updated;
       });
 
-      if (HP_REGEN_PER_SECOND > 0 && deltaSeconds > 0) {
-        const regenAmount = HP_REGEN_PER_SECOND * deltaSeconds;
-        setStats((prev) => {
-          if (prev.hp >= MAX_HP) {
-            return prev;
+      const insideHealingZone = isInHealingZoneRef.current;
+      if (insideHealingZone) {
+        if (deltaSeconds > 0) {
+          if (hpRef.current <= 0) {
+            healingZoneTimerRef.current = Math.min(
+              healingZoneTimerRef.current + deltaSeconds,
+              HEALING_ZONE_ZERO_HP_DELAY_SECONDS
+            );
+          } else {
+            healingZoneTimerRef.current = 0;
           }
-          const nextHp = Math.min(prev.hp + regenAmount, MAX_HP);
-          if (nextHp === prev.hp) {
-            return prev;
-          }
-          return { ...prev, hp: Number(nextHp.toFixed(2)) };
-        });
+        }
+
+        const canRegen =
+          hpRef.current > 0 || healingZoneTimerRef.current >= HEALING_ZONE_ZERO_HP_DELAY_SECONDS;
+        if (canRegen && deltaSeconds > 0) {
+          const regenAmount = HEALING_ZONE_REGEN_PER_SECOND * deltaSeconds;
+          setStats((prev) => {
+            const currentHp = prev.hp;
+            const readyForZeroHpRegen =
+              currentHp > 0 ||
+              (currentHp <= 0 && healingZoneTimerRef.current >= HEALING_ZONE_ZERO_HP_DELAY_SECONDS);
+            if (!readyForZeroHpRegen || currentHp >= MAX_HP) {
+              return prev;
+            }
+            const nextHp = Math.min(currentHp + regenAmount, MAX_HP);
+            if (nextHp === currentHp) {
+              return prev;
+            }
+            const rounded = Number(nextHp.toFixed(2));
+            hpRef.current = rounded;
+            if (rounded > 0) {
+              healingZoneTimerRef.current = 0;
+            }
+            return { ...prev, hp: rounded };
+          });
+        }
+      } else {
+        healingZoneTimerRef.current = 0;
       }
 
       const stage = hapticStageRef.current;
@@ -558,6 +613,9 @@ export default function App() {
           <Text style={styles.statusMeta}>直近ダメージ合計: -{lastDamageDisplay} HP</Text>
           <Text style={styles.statusMeta}>
             影響中の危険源: {activeHazardCount}/{totalHazardCount}
+          </Text>
+          <Text style={styles.statusMeta}>
+            ヒーリングゾーン: {isInHealingZone ? '内' : '外'}
           </Text>
         </View>
       </View>
