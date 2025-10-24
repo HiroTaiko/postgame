@@ -159,9 +159,9 @@ const createInitialMovingHazardState = (config) => {
 
 const DANGER_ZONES = [
   {
-    id: 'scramble-beacon',
-    name: '羽根木',
-    coords: { latitude: 35.657736, longitude: 139.654440 },
+    id: 'garakuta',
+    name: 'がらくた',
+    coords: { latitude: 37.5637209353559, longitude: 140.99321916494142 },
     safeRadius: 60,
     baseDamage: 6,
     scale: 30,
@@ -170,8 +170,8 @@ const DANGER_ZONES = [
   },
   {
     id: 'station-rift',
-    name: '代田八幡',
-    coords: { latitude: 35.657420, longitude: 139.659367 },
+    name: 'テック工房',
+    coords: { latitude: 37.56385812102285, longitude: 140.99152814703658 },
     safeRadius: 60,
     baseDamage: 6,
     scale: 30,
@@ -179,9 +179,29 @@ const DANGER_ZONES = [
     maxDamage: 18
   },
   {
-    id: 'park-resonator',
-    name: 'トトロ',
-    coords: { latitude: 35.658889877286676, longitude: 139.66268309340128 },
+    id: 'area-center',
+    name: '交流センター広場',
+    coords: { latitude: 37.56434331449345, longitude: 140.99237426307516 },
+    safeRadius: 60,
+    baseDamage: 6,
+    scale: 30,
+    offset: 0.1,
+    maxDamage: 18
+  },
+  {
+    id: 'puku',
+    name: 'puku',
+    coords: { latitude: 37.56334549068359, longitude: 140.98913906488454 },
+    safeRadius: 60,
+    baseDamage: 6,
+    scale: 30,
+    offset: 0.1,
+    maxDamage: 18
+  },
+  {
+    id: 'haccoba',
+    name: 'sake',
+    coords: { latitude: 37.561486942859, longitude: 140.9914438352546 },
     safeRadius: 60,
     baseDamage: 6,
     scale: 30,
@@ -192,23 +212,23 @@ const DANGER_ZONES = [
 
 const MOVING_HAZARD = {
   id: 'phantom-scout',
-  name: '下北駅',
-  center: { latitude: 35.661383, longitude: 139.667557 },
-  radiusMeters: 30,
+  name: 'center',
+  center: { latitude: 37.563886, longitude: 140.991698 },
+  radiusMeters: 300,
   safeRadius: 60,
   baseDamage: 6,
   scale: 135,
-  offset: 3,
-  speedMetersPerSecond: 3,
+  offset: 0.1,
+  speedMetersPerSecond: 4,
   initialHeadingDegrees: 45,
   initialOffsetMeters: { x: 120, y: -60 }
 };
 
 const HEALING_ZONE = {
   id: 'sanctuary-courtyard',
-  name: '森の泉',
-  center: { latitude: 35.65995, longitude: 139.6648 },
-  radiusMeters: 20
+  name: '神の住まう場所',
+  center: { latitude: 37.568509, longitude: 140.990278 },
+  radiusMeters: 58
 };
 
 const INITIAL_STATS = {
