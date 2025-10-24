@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
+import * as Haptics from 'expo-haptics';
 
 const MAX_HP = 1000;
 const SECONDARY_STAT_MAX = 10;
@@ -76,6 +77,19 @@ const formatDistance = (distanceMeters) => {
     return `${(distanceMeters / 1000).toFixed(2)} km`;
   }
   return `${distanceMeters.toFixed(1)} m`;
+};
+
+const getHapticsConfig = (damage) => {
+  if (!Number.isFinite(damage) || damage < 1) {
+    return { stage: 0, intervalMs: 0, style: Haptics.ImpactFeedbackStyle.Light };
+  }
+  if (damage >= 6) {
+    return { stage: 3, intervalMs: 1000, style: Haptics.ImpactFeedbackStyle.Heavy };
+  }
+  if (damage >= 3) {
+    return { stage: 2, intervalMs: 2000, style: Haptics.ImpactFeedbackStyle.Medium };
+  }
+  return { stage: 1, intervalMs: 3000, style: Haptics.ImpactFeedbackStyle.Light };
 };
 
 const advanceWithinCircle = (offset, direction, distance, radius) => {
@@ -209,6 +223,10 @@ export default function App() {
   );
   const movementTimestampRef = useRef(Date.now());
   const locationRef = useRef(null);
+  const hapticStageRef = useRef(0);
+  const hapticIntervalRef = useRef(0);
+  const hapticStyleRef = useRef(Haptics.ImpactFeedbackStyle.Light);
+  const lastHapticTimeRef = useRef(0);
 
   useEffect(() => {
     requestPermissions();
@@ -221,6 +239,25 @@ export default function App() {
   useEffect(() => {
     movingHazardRef.current = movingHazardState;
   }, [movingHazardState]);
+
+  const updateDamageHaptics = useCallback((damage) => {
+    const { stage, intervalMs, style } = getHapticsConfig(damage);
+    const previousStage = hapticStageRef.current;
+
+    hapticStageRef.current = stage;
+    hapticIntervalRef.current = intervalMs;
+    hapticStyleRef.current = style;
+
+    if (stage === 0) {
+      lastHapticTimeRef.current = 0;
+      return;
+    }
+
+    if (previousStage < stage || lastHapticTimeRef.current === 0) {
+      Haptics.impactAsync(style).catch(() => {});
+      lastHapticTimeRef.current = Date.now();
+    }
+  }, []);
 
   const applyProximityEffects = useCallback(
     (coords) => {
@@ -280,6 +317,8 @@ export default function App() {
       const totalMitigatedDamage = summaries.reduce((sum, entry) => sum + entry.mitigatedDamage, 0);
       const damageApplied = Number(totalMitigatedDamage.toFixed(2));
 
+      updateDamageHaptics(damageApplied);
+
       if (damageApplied > 0) {
         setStats((prev) => {
           const nextHp = Math.max(prev.hp - damageApplied, 0);
@@ -292,7 +331,7 @@ export default function App() {
 
       setLastDamage(damageApplied);
     },
-    [stats.guard]
+    [stats.guard, updateDamageHaptics]
   );
 
   const requestPermissions = async () => {
@@ -377,6 +416,16 @@ export default function App() {
           }
           return { ...prev, hp: Number(nextHp.toFixed(2)) };
         });
+      }
+
+      const stage = hapticStageRef.current;
+      const intervalMs = hapticIntervalRef.current;
+      if (stage > 0 && intervalMs > 0) {
+        const lastTriggered = lastHapticTimeRef.current || 0;
+        if (now - lastTriggered >= intervalMs) {
+          Haptics.impactAsync(hapticStyleRef.current).catch(() => {});
+          lastHapticTimeRef.current = now;
+        }
       }
 
       const currentCoords = locationRef.current?.coords;
