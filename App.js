@@ -3,8 +3,9 @@ import { Button, Platform, SafeAreaView, StyleSheet, Text, View } from 'react-na
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
 
-const MAX_HP = 100;
+const MAX_HP = 1000;
 const SECONDARY_STAT_MAX = 10;
+const HP_REGEN_PER_SECOND = 1;
 const METERS_PER_DEG_LAT = 111320;
 
 const toRadians = (degrees) => (degrees * Math.PI) / 180;
@@ -142,48 +143,48 @@ const createInitialMovingHazardState = (config) => {
 const DANGER_ZONES = [
   {
     id: 'scramble-beacon',
-    name: '交差点ビーコン',
-    coords: { latitude: 35.6595, longitude: 139.7005 },
-    safeRadius: 220,
-    coefficient: 0.001,
+    name: '羽根木',
+    coords: { latitude: 35.657736, longitude: 139.654440 },
+    safeRadius: 25,
+    coefficient: 0.02,
     maxDamage: 18,
-    minDamage: 0
+    minDamage: 6
   },
   {
     id: 'station-rift',
-    name: '駅前裂け目',
-    coords: { latitude: 35.658, longitude: 139.7016 },
-    safeRadius: 160,
-    coefficient: 0.0015,
-    maxDamage: 22,
-    minDamage: 2
+    name: '代田八幡',
+    coords: { latitude: 35.657420, longitude: 139.659367 },
+    safeRadius: 25,
+    coefficient: 0.02,
+    maxDamage: 18,
+    minDamage: 6
   },
   {
     id: 'park-resonator',
-    name: '公園レゾネーター',
-    coords: { latitude: 35.6719, longitude: 139.698 },
-    safeRadius: 280,
-    coefficient: 0.0008,
-    maxDamage: 15,
-    minDamage: 0
+    name: 'トトロ',
+    coords: { latitude: 35.658889877286676, longitude: 139.66268309340128 },
+    safeRadius: 25,
+    coefficient: 0.02,
+    maxDamage: 18,
+    minDamage: 6
   }
 ];
 
 const MOVING_HAZARD = {
   id: 'phantom-scout',
-  name: 'ファントムスカウト',
-  center: { latitude: 35.6642, longitude: 139.6995 },
-  radiusMeters: 260,
-  safeRadius: 200,
-  coefficient: 0.0012,
-  minDamage: 1,
-  speedMetersPerSecond: 14,
+  name: '下北駅',
+  center: { latitude: 35.661383, longitude: 139.667557 },
+  radiusMeters: 30,
+  safeRadius: 30,
+  coefficient: 0.05,
+  minDamage: 6,
+  speedMetersPerSecond: 3,
   initialHeadingDegrees: 45,
   initialOffsetMeters: { x: 120, y: -60 }
 };
 
 const INITIAL_STATS = {
-  hp: 100,
+  hp: 1000,
   guard: 5,
   resonance: 5
 };
@@ -339,16 +340,16 @@ export default function App() {
   useEffect(() => {
     movementTimestampRef.current = Date.now();
     const interval = setInterval(() => {
+      const now = Date.now();
+      let deltaSeconds = (now - movementTimestampRef.current) / 1000;
+      movementTimestampRef.current = now;
+
+      if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) {
+        deltaSeconds = 1;
+      }
+      deltaSeconds = Math.min(deltaSeconds, 2);
+
       setMovingHazardState((prev) => {
-        const now = Date.now();
-        let deltaSeconds = (now - movementTimestampRef.current) / 1000;
-        movementTimestampRef.current = now;
-
-        if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) {
-          deltaSeconds = 1;
-        }
-        deltaSeconds = Math.min(deltaSeconds, 2);
-
         const travelDistance = MOVING_HAZARD.speedMetersPerSecond * deltaSeconds;
         const { position, direction } = advanceWithinCircle(
           prev.offset,
@@ -363,6 +364,20 @@ export default function App() {
         movingHazardRef.current = updated;
         return updated;
       });
+
+      if (HP_REGEN_PER_SECOND > 0 && deltaSeconds > 0) {
+        const regenAmount = HP_REGEN_PER_SECOND * deltaSeconds;
+        setStats((prev) => {
+          if (prev.hp >= MAX_HP) {
+            return prev;
+          }
+          const nextHp = Math.min(prev.hp + regenAmount, MAX_HP);
+          if (nextHp === prev.hp) {
+            return prev;
+          }
+          return { ...prev, hp: Number(nextHp.toFixed(2)) };
+        });
+      }
 
       const currentCoords = locationRef.current?.coords;
       if (currentCoords) {
