@@ -8,6 +8,7 @@ const MAX_HP = 1000;
 const SECONDARY_STAT_MAX = 10;
 const METERS_PER_DEG_LAT = 111320;
 const HEALING_ZONE_REGEN_PER_SECOND = 3;
+const PASSIVE_REGEN_PER_SECOND = 1;
 const HEALING_ZONE_ZERO_HP_DELAY_SECONDS = 60;
 
 const toRadians = (degrees) => (degrees * Math.PI) / 180;
@@ -59,14 +60,17 @@ const evaluateZoneDamage = (distanceMeters, zone) => {
   if (distanceMeters == null || !Number.isFinite(distanceMeters)) {
     return 0;
   }
-  if (distanceMeters >= zone.safeRadius) {
+  const sourceRadius = zone.sourceRadius ?? 0;
+  const effectiveDistance = Math.max(0, distanceMeters - sourceRadius);
+
+  if (effectiveDistance >= zone.safeRadius) {
     return 0;
   }
 
   const baseDamage = zone.baseDamage ?? 0;
   const scale = zone.scale ?? 0;
   const offset = zone.offset ?? 0;
-  const denominator = distanceMeters + offset;
+  const denominator = effectiveDistance + offset;
   const effectiveDenominator = denominator > 0 ? denominator : 0.1;
   const uncappedDamage = baseDamage + scale / effectiveDenominator;
   return zone.maxDamage == null ? uncappedDamage : Math.min(zone.maxDamage, uncappedDamage);
@@ -215,6 +219,7 @@ const MOVING_HAZARD = {
   name: 'center',
   center: { latitude: 37.563886, longitude: 140.991698 },
   radiusMeters: 300,
+  sourceRadius: 5,
   safeRadius: 60,
   baseDamage: 6,
   scale: 135,
@@ -458,6 +463,24 @@ export default function App() {
         movingHazardRef.current = updated;
         return updated;
       });
+
+      if (deltaSeconds > 0) {
+        const passiveRegenAmount = PASSIVE_REGEN_PER_SECOND * deltaSeconds;
+        if (passiveRegenAmount > 0) {
+          setStats((prev) => {
+            if (prev.hp <= 0 || prev.hp >= MAX_HP) {
+              return prev;
+            }
+            const nextHp = Math.min(prev.hp + passiveRegenAmount, MAX_HP);
+            if (nextHp === prev.hp) {
+              return prev;
+            }
+            const rounded = Number(nextHp.toFixed(2));
+            hpRef.current = rounded;
+            return { ...prev, hp: rounded };
+          });
+        }
+      }
 
       const insideHealingZone = isInHealingZoneRef.current;
       if (insideHealingZone) {
