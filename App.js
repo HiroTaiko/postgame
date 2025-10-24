@@ -184,7 +184,7 @@ const MOVING_HAZARD = {
 };
 
 const INITIAL_STATS = {
-  hp: 100,
+  hp: 1000,
   guard: 5,
   resonance: 5
 };
