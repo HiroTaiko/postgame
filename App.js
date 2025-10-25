@@ -24,6 +24,152 @@ const offsetsToCoords = (center, offsetX, offsetY) => {
   };
 };
 
+const coordsToOffsets = (center, coords) => {
+  if (!center || !coords) {
+    return { x: 0, y: 0 };
+  }
+  const latitude = coords.latitude ?? center.latitude;
+  const longitude = coords.longitude ?? center.longitude;
+  const deltaLatMeters = (latitude - center.latitude) * METERS_PER_DEG_LAT;
+  const deltaLonMeters = (longitude - center.longitude) * metersPerDegreeLon(center.latitude);
+  return { x: deltaLonMeters, y: deltaLatMeters };
+};
+
+const POSITION_FILTER_CONFIG = {
+  alpha: 0.4,
+  beta: 0.08,
+  emaAlpha: 0.35,
+  minMovementMeters: 0.75,
+  maxReasonableSpeedMps: 5.5,
+  minDeltaSeconds: 0.05,
+  maxDeltaSeconds: 3
+};
+
+const clampDeltaSeconds = (deltaSeconds) => {
+  if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) {
+    return 1;
+  }
+  return Math.min(
+    Math.max(deltaSeconds, POSITION_FILTER_CONFIG.minDeltaSeconds),
+    POSITION_FILTER_CONFIG.maxDeltaSeconds
+  );
+};
+
+const createAlphaBetaAxis = (alpha, beta) => {
+  let initialized = false;
+  let position = 0;
+  let velocity = 0;
+
+  const reset = () => {
+    initialized = false;
+    position = 0;
+    velocity = 0;
+  };
+
+  const step = (deltaSeconds, measurement) => {
+    const dt = clampDeltaSeconds(deltaSeconds);
+
+    if (!initialized) {
+      if (measurement == null) {
+        return null;
+      }
+      position = measurement;
+      velocity = 0;
+      initialized = true;
+      return { position, velocity };
+    }
+
+    const predictedPosition = position + velocity * dt;
+
+    if (measurement == null) {
+      position = predictedPosition;
+      return { position, velocity };
+    }
+
+    const residual = measurement - predictedPosition;
+    position = predictedPosition + alpha * residual;
+    velocity = velocity + (beta / dt) * residual;
+    return { position, velocity };
+  };
+
+  return { reset, step };
+};
+
+const createPositionFilter = () => {
+  const axisX = createAlphaBetaAxis(POSITION_FILTER_CONFIG.alpha, POSITION_FILTER_CONFIG.beta);
+  const axisY = createAlphaBetaAxis(POSITION_FILTER_CONFIG.alpha, POSITION_FILTER_CONFIG.beta);
+
+  let referenceCoords = null;
+  let emaPosition = null;
+  let lastTimestamp = null;
+  let lastStableCoords = null;
+
+  const reset = () => {
+    axisX.reset();
+    axisY.reset();
+    referenceCoords = null;
+    emaPosition = null;
+    lastTimestamp = null;
+    lastStableCoords = null;
+  };
+
+  const applyMeasurement = (position) => {
+    if (!position?.coords) {
+      return lastStableCoords;
+    }
+
+    const timestampMs =
+      typeof position.timestamp === 'number' ? position.timestamp : Date.now();
+    let deltaSeconds =
+      lastTimestamp == null ? 1 : (timestampMs - lastTimestamp) / 1000;
+    deltaSeconds = clampDeltaSeconds(deltaSeconds);
+
+    if (!referenceCoords) {
+      referenceCoords = position.coords;
+    }
+
+    const offsets = coordsToOffsets(referenceCoords, position.coords);
+
+    let acceptMeasurement = lastStableCoords == null;
+    if (lastStableCoords) {
+      const movement = calculateDistanceMeters(lastStableCoords, position.coords);
+      const speed = movement / Math.max(deltaSeconds, POSITION_FILTER_CONFIG.minDeltaSeconds);
+      if (speed > POSITION_FILTER_CONFIG.maxReasonableSpeedMps) {
+        acceptMeasurement = false;
+      } else if (movement < POSITION_FILTER_CONFIG.minMovementMeters) {
+        acceptMeasurement = false;
+      } else {
+        acceptMeasurement = true;
+      }
+    }
+
+    const stateX = axisX.step(deltaSeconds, acceptMeasurement ? offsets.x : null);
+    const stateY = axisY.step(deltaSeconds, acceptMeasurement ? offsets.y : null);
+
+    lastTimestamp = timestampMs;
+
+    if (!stateX || !stateY) {
+      return lastStableCoords;
+    }
+
+    const filteredOffsets = { x: stateX.position, y: stateY.position };
+    if (!emaPosition) {
+      emaPosition = filteredOffsets;
+    } else {
+      emaPosition = {
+        x: emaPosition.x + POSITION_FILTER_CONFIG.emaAlpha * (filteredOffsets.x - emaPosition.x),
+        y: emaPosition.y + POSITION_FILTER_CONFIG.emaAlpha * (filteredOffsets.y - emaPosition.y)
+      };
+    }
+
+    const stabilizedCoords = offsetsToCoords(referenceCoords, emaPosition.x, emaPosition.y);
+    lastStableCoords = stabilizedCoords;
+    return stabilizedCoords;
+  };
+
+  return { applyMeasurement, reset };
+};
+
 const clampOffsetToRadius = (offset, radius) => {
   const length = Math.hypot(offset.x, offset.y);
   if (length === 0) {
@@ -235,6 +381,7 @@ const INITIAL_STATS = {
 export default function App() {
   const [permissionStatus, setPermissionStatus] = useState(null);
   const [location, setLocation] = useState(null);
+  const [stabilizedCoords, setStabilizedCoords] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const [stats, setStats] = useState(INITIAL_STATS);
   const [lastDamage, setLastDamage] = useState(0);
@@ -244,6 +391,7 @@ export default function App() {
     createInitialMovingHazardState(MOVING_HAZARD)
   );
   const watcherRef = useRef(null);
+  const positionFilterRef = useRef(createPositionFilter());
   const movingHazardRef = useRef(movingHazardState);
   const movingDirectionRef = useRef(
     normalizeVector({
@@ -384,6 +532,33 @@ export default function App() {
     [stats.guard, updateDamageHaptics]
   );
 
+  const handleLocationUpdate = useCallback(
+    (position) => {
+      if (!position) {
+        setLocation(null);
+        positionFilterRef.current.reset();
+        locationRef.current = null;
+        setStabilizedCoords(null);
+        applyProximityEffects(null);
+        return;
+      }
+
+      setLocation(position);
+      const filteredCoords = positionFilterRef.current.applyMeasurement(position);
+      const coordsForEffects = filteredCoords ?? position.coords ?? null;
+
+      if (!coordsForEffects) {
+        return;
+      }
+
+      const stabilizedPosition = { ...position, coords: coordsForEffects };
+      locationRef.current = stabilizedPosition;
+      setStabilizedCoords(coordsForEffects);
+      applyProximityEffects(coordsForEffects);
+    },
+    [applyProximityEffects]
+  );
+
   const requestPermissions = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -392,8 +567,7 @@ export default function App() {
       if (status !== Location.PermissionStatus.GRANTED) {
         watcherRef.current?.remove();
         watcherRef.current = null;
-        setLocation(null);
-        locationRef.current = null;
+        handleLocationUpdate(null);
         setErrorMsg('位置情報へのアクセスが許可されていません');
         setZoneSummaries([]);
         setLastDamage(0);
@@ -401,10 +575,12 @@ export default function App() {
       }
 
       setErrorMsg(null);
+      positionFilterRef.current.reset();
+      setStabilizedCoords(null);
+      locationRef.current = null;
+
       const currentLocation = await Location.getCurrentPositionAsync({});
-      setLocation(currentLocation);
-      locationRef.current = currentLocation;
-      applyProximityEffects(currentLocation.coords);
+      handleLocationUpdate(currentLocation);
 
       watcherRef.current?.remove();
 
@@ -414,9 +590,7 @@ export default function App() {
           distanceInterval: 5
         },
         (position) => {
-          setLocation(position);
-          locationRef.current = position;
-          applyProximityEffects(position.coords);
+          handleLocationUpdate(position);
         }
       );
 
@@ -555,6 +729,9 @@ export default function App() {
     }
 
     const { latitude, longitude, altitude } = location.coords;
+    const filtered = stabilizedCoords;
+    const correctionDistance =
+      filtered ? calculateDistanceMeters(location.coords, filtered) : null;
 
     return (
       <View style={styles.locationContainer}>
@@ -564,6 +741,18 @@ export default function App() {
           <Text style={styles.coordinate}>高度: {altitude.toFixed(1)} m</Text>
         )}
         <Text style={styles.meta}>更新: {new Date(location.timestamp).toLocaleString()}</Text>
+        {filtered && (
+          <View>
+            <Text style={styles.meta}>
+              補正後: {filtered.latitude.toFixed(6)}, {filtered.longitude.toFixed(6)}
+            </Text>
+            {correctionDistance != null && (
+              <Text style={styles.meta}>
+                補正差: 約{correctionDistance.toFixed(1)} m
+              </Text>
+            )}
+          </View>
+        )}
         {Platform.OS === 'android' && (
           <Text style={styles.meta}>Androidで精度が低い場合は位置設定を高精度にしてください。</Text>
         )}
